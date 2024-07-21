@@ -1,0 +1,317 @@
+//////1. Generate the count and sum values for potential forest cover and existing forest cover for each 10-meter height elevational band of each mountain
+//Data import 
+      var bastin = ee.Image("users/yuangchen00/Bastin"),
+          mountain = ee.FeatureCollection("users/yuangchen00/Global_forest_mountane"),
+          forest15 = ee.Image("users/yuangchen00/Forest_15_1km_202200802"),
+          nativeforest15 = ee.Image("users/yuangchen00/Nativeforest_15_1km_202200817"),
+          DEM = ee.Image("users/yuangchen00/DEM_1km_20240416");
+//Data pre-processing
+      var forest=forest15;//forest15 nativeforest15
+      var coverage=30;//10 20 30 40
+      var file_name='forest_10mband_30';//eg. nativeforest_10mband_30
+      var DEM10 = DEM.divide(10.0).floor().int();
+      var bastin=bastin.where(bastin.lt(coverage),ee.Image(0)).where(bastin.gte(coverage),ee.Image(1));
+      var scale=bastin.projection().nominalScale();
+      var forest = forest.addBands(DEM10);
+      var forest= forest.updateMask(bastin.eq(1));
+      var reducers1 = ee.Reducer.sum().combine({
+        reducer2: ee.Reducer.count(),
+        sharedInputs: true
+      });
+//Stastic
+      var result=ee.List([]);
+      var index = 1;
+      while (index  < 806) {
+        var region = ee.Feature(ee.FeatureCollection(mountain).
+          filter(ee.Filter.eq('ID',index)).first());
+        var s = forest.reduceRegion({
+          reducer: reducers1.group({
+          groupField: 1,
+          groupName: 'dem10',
+        }),
+          geometry: region.geometry(),
+          maxPixels: 1e15,
+          //bestEffort: true,
+          scale: scale
+        });
+        var result=result.add(s);
+        index ++;
+      }
+//Export table from GEE
+      var forest_10mband = ee.FeatureCollection(result.map(function(element){
+        element = ee.Dictionary(element); 
+        var list = ee.List(element.get('groups'));
+        var feats = ee.FeatureCollection(list.map(function(listEl){
+          var dict = ee.Dictionary(listEl);
+          return ee.Feature(null, dict);
+        }));
+        return feats;
+      })).flatten();
+      Export.table.toDrive({
+        collection: forest_10mband,
+        description: file_name,
+        fileFormat: 'CSV'});
+
+
+//////2. Generate the count and sum values for potential forest cover and existing forest cover inside protected areas for each 10-meter height elevational band of each mountain
+//Data import
+      var bastin = ee.Image("users/yuangchen00/Bastin"),
+          PA = ee.Image("users/yuangchen00/PA_ALLPOLY_1km_mountain_20220804"),
+          mountain = ee.FeatureCollection("users/yuangchen00/Global_forest_mountane"),
+          forest15 = ee.Image("users/yuangchen00/Forest_15_1km_202200802"),
+          nativeforest15 = ee.Image("users/yuangchen00/Nativeforest_15_1km_202200817"),
+          PA_china = ee.Image("users/yuangchen00/PA_China_1km_mountain_20221101"),
+          PA_point = ee.Image("users/yuangchen00/PA_Pointbuffer_1km_mountain_20220824"),
+          DEM = ee.Image("users/yuangchen00/DEM_1km_20240416");
+//Data pre-processing
+      var forest=forest15; //forest15 nativeforest15
+      var coverage=30;//10 20 30 40
+      var file_name='PAforest_10mband_30';
+      var DEM10 = DEM.divide(10.0).floor().int();
+      var bastin=bastin.where(bastin.lt(coverage),ee.Image(0)).where(bastin.gte(coverage),ee.Image(1));
+      var scale=bastin.projection().nominalScale();
+      var PA = PA.where(PA_china.eq(1), ee.Image(1)).where(PA_point.eq(1), ee.Image(1));
+      var PAforest = ee.Image(0).where(forest.eq(1).and(PA.eq(1)),ee.Image(1));
+      var PAforest = PAforest.addBands(DEM10);
+      var PAforest=PAforest.updateMask(bastin.eq(1));
+      var reducers1 = ee.Reducer.sum().combine({
+        reducer2: ee.Reducer.count(),
+        sharedInputs: true
+      });
+//Stastic
+      var result=ee.List([]);
+      var index = 1;
+      while (index  < 806) {
+        var region = ee.Feature(ee.FeatureCollection(mountain).
+          filter(ee.Filter.eq('ID',index)).first());
+        var s = PAforest.reduceRegion({
+          reducer: reducers1.group({
+          groupField: 1,
+          groupName: 'dem10',
+        }),
+          geometry: region.geometry(),
+          maxPixels: 1e15,
+          //bestEffort: true,
+          scale: scale
+        });
+        var result=result.add(s);
+        index ++;
+      }
+//Export table from GEE
+      var PAforest_10mband = ee.FeatureCollection(result.map(function(element){
+        element = ee.Dictionary(element); 
+        var list = ee.List(element.get('groups'));
+        var feats = ee.FeatureCollection(list.map(function(listEl){
+          var dict = ee.Dictionary(listEl);
+          return ee.Feature(null, dict);
+        }));
+        return feats;
+      })).flatten();
+      Export.table.toDrive({
+        collection: PAforest_10mband,
+        description:file_name,
+        fileFormat: 'CSV'});
+
+
+//////3. Generate the count and sum values of potential forest cover and exsiting forest cover for each each combination of 1 °C MAT and 100 mm y-1 MAP bins for each mountain
+//Data import
+      var T = ee.Image("users/yuangchen00/wc_bio_1"),
+          P = ee.Image("users/yuangchen00/wc_bio_12"),
+          bastin = ee.Image("users/yuangchen00/Bastin"),
+          forest15 = ee.Image("users/yuangchen00/Forest_15_1km_202200802"),
+          nativeforest15 = ee.Image("users/yuangchen00/Nativeforest_15_1km_202200817"),
+          DEM = ee.Image("users/yuangchen00/DEM_1km_20240416"),
+          mountain = ee.FeatureCollection("users/yuangchen00/Global_forest_mountane_lowele_20240428");
+//Data pre-processing 
+      var T=T.floor().int();
+      var P=P.divide(100.0).floor().int();
+    //create code of the combinations of MAT and MAP bins
+      var code = T.expression(
+         "P*100+T+50",
+         {
+           "P": P,
+           "T": T
+         });
+      var i=0;//from 0 to 4 when i>=4, var forest should change from forest15 to nativeforest15
+      var forest=nativeforest15;//forest15 nativeforest15
+      var coveragelist=[10,20,30,40,30];
+      var file_name=['mountain_clim_F10','mountain_clim_F20','mountain_clim_F30','mountain_clim_F40','mountain_clim_NF30'];
+      var coverage=ee.Number(ee.List(coveragelist).get(i));
+      print(ee.List(file_name).get(i));
+      var scale=bastin.projection().nominalScale();
+      var bastin=bastin.where(bastin.lt(coverage),ee.Image(0)).where(bastin.gte(coverage),ee.Image(1));
+      var forest=forest.addBands(code);
+      var reducers1 = ee.Reducer.sum().combine({
+        reducer2: ee.Reducer.count(),
+        sharedInputs: true
+      });
+//Stastics
+      var result=ee.List([]);
+      var index = 1;
+      while (index  < 806) {
+        var region = ee.Feature(ee.FeatureCollection(mountain).
+          filter(ee.Filter.eq('ID',index)).first());
+        var F=forest.updateMask(bastin.eq(1));
+        var lowele=ee.Number(region.get(ee.String(ee.List(namelist).get(i))));
+        var result=ee.Algorithms.If({ 
+          condition:lowele.gt(-50),
+          trueCase: ee.List(result).add(F.reduceRegion({
+          reducer: reducers1.group({
+          groupField: 1,
+          groupName: 'code',
+        }),
+          geometry: region.geometry(),
+          maxPixels: 1e15,
+          //bestEffort: true,
+          scale: scale
+        })),
+          falseCase:result
+        });
+        index ++;
+      }
+//Export table from GEE
+      var mountain_clim = ee.FeatureCollection(ee.List(result).map(function(element){
+        element = ee.Dictionary(element); 
+        var list = ee.List(element.get('groups'));
+        var feats = ee.FeatureCollection(list.map(function(listEl){
+          var dict = ee.Dictionary(listEl);
+          return ee.Feature(null, dict);
+        }));
+        return feats;
+      })).flatten();
+      Export.table.toDrive({
+        collection: mountain_clim,
+        description: 'mountain_clim',
+        fileFormat: 'CSV'});
+
+
+//////4. Generate the count and sum values of potential forest cover and exsiting forest cover at the lower elevations aross world's mountains for each each combination of 1 °C MAT and 100 mm y-1 MAP bins
+//Data import
+      var T = ee.Image("users/yuangchen00/wc_bio_1"),
+          P = ee.Image("users/yuangchen00/wc_bio_12"),
+          bastin = ee.Image("users/yuangchen00/Bastin"),
+          forest15 = ee.Image("users/yuangchen00/Forest_15_1km_202200802"),
+          nativeforest15 = ee.Image("users/yuangchen00/Nativeforest_15_1km_202200817"),
+          DEM = ee.Image("users/yuangchen00/DEM_1km_20240416"),
+          mountain = ee.FeatureCollection("users/yuangchen00/Global_forest_mountane_lowele_20240428");
+//Data pre-processing
+      var T=T.floor().int();
+      var P=P.divide(100.0).floor().int();
+    //create code of the combinations of MAT and MAP bins
+      var code = T.expression(
+         "P*100+T+50",
+         {
+           "P": P,
+           "T": T
+         });
+      var i=0;//from 0 to 9 when i>=8, var forest should change from forest15 to nativeforest15
+      var forest=nativeforest15;//forest15 nativeforest15
+      var namelist=['F10_low3','F10_low500','F20_low3','F20_low500','F30_low3','F30_low500','F40_low3','F40_low500','NF30_low3','NF30_low50'];
+      var coveragelist=[10,10,20,20,30,30,40,40,30,30];
+      var file_name=['mountain_clim_F10_low3','mountain_clim_F10_low500','mountain_clim_F20_low3','mountain_clim_F20_low500','mountain_clim_F30_low3','mountain_clim_F30_low500','mountain_clim_F40_low3','mountain_clim_F40_low500','mountain_clim_NF30_low3','mountain_clim_NF30_low500'];
+      var coverage=ee.Number(ee.List(coveragelist).get(i));
+      print(ee.List(file_name).get(i));
+      var scale=bastin.projection().nominalScale();
+      var bastin=bastin.where(bastin.lt(coverage),ee.Image(0)).where(bastin.gte(coverage),ee.Image(1));
+            var forest=forest.addBands(code);
+            var reducers1 = ee.Reducer.sum().combine({
+              reducer2: ee.Reducer.count(),
+              sharedInputs: true
+            });
+//Stastics
+      var result=ee.List([]);
+      var index = 1;
+      while (index  < 806) {
+        var region = ee.Feature(ee.FeatureCollection(mountain).
+          filter(ee.Filter.eq('ID',index)).first());
+        var lowele=ee.Number(region.get(ee.String(ee.List(namelist).get(i))));
+        //low3/low500
+        var F=forest.updateMask(bastin.eq(1).and(DEM.lte(ee.Image.constant(lowele))));
+        var result=ee.Algorithms.If({ 
+          condition:lowele.gt(-50),
+          trueCase: ee.List(result).add(F.reduceRegion({
+          reducer: reducers1.group({
+          groupField: 1,
+          groupName: 'code',
+        }),
+          geometry: region.geometry(),
+          maxPixels: 1e15,
+          //bestEffort: true,
+          scale: scale
+        })),
+          falseCase:result
+        });
+        index ++;
+      }
+//Export table from GEE
+      var mountain_clim = ee.FeatureCollection(ee.List(result).map(function(element){
+        element = ee.Dictionary(element); 
+        var list = ee.List(element.get('groups'));
+        var feats = ee.FeatureCollection(list.map(function(listEl){
+          var dict = ee.Dictionary(listEl);
+          return ee.Feature(null, dict);
+        }));
+        return feats;
+      })).flatten();
+      Export.table.toDrive({
+        collection: mountain_clim,
+        description: 'mountain_clim',
+        fileFormat: 'CSV'});
+
+
+//////5. Generate the count and sum values of factors(HFP,MAP,water deficit,slope) for each 10-meter height elevational band of each mountain
+//Data import
+      var bastin = ee.Image("users/yuangchen00/Bastin"),
+          mountain = ee.FeatureCollection("users/yuangchen00/Global_forest_mountane"),
+          DEM = ee.Image("users/yuangchen00/DEM_1km_20240416"),
+          Slope = ee.Image("users/yuangchen00/Slope_1km_20240427"),
+          HFP = ee.Image("users/yuangchen00/HFP_1km_20240602"),
+          WaterDeficit = ee.Image("users/yuangchen00/WaterDeficit_1km_20240602"),
+          MAP = ee.Image("users/yuangchen00/MAP_1km_20240602");
+//Data pre-processing
+      var coverage=30;//10 20 30 40
+      var Variable=MAP;//HFP,MAP,Slope,WaterDeficit
+      var file_name='HFP_10mband_30';//HFP_10mband_30,MAP_10mband_30,Slope_10mband_30,WaterDeficit_10mband_30
+      var DEM10 = DEM.divide(10.0).floor().int();
+      var bastin=bastin.where(bastin.lt(coverage),ee.Image(0)).where(bastin.gte(coverage),ee.Image(1));
+      var scale=bastin.projection().nominalScale();
+      var Variable = Variable.addBands(DEM10);
+      var Variable= Variable.updateMask(bastin.eq(1));
+//Stastics
+      var reducers1 = ee.Reducer.sum().combine({
+        reducer2: ee.Reducer.count(),
+        sharedInputs: true
+      });
+      var result=ee.List([]);
+      var index = 1;
+      while (index  < 806) {
+        var region = ee.Feature(ee.FeatureCollection(mountain).
+          filter(ee.Filter.eq('ID',index)).first());
+        var s = Variable.reduceRegion({
+          reducer: reducers1.group({
+          groupField: 1,
+          groupName: 'dem10',
+        }),
+          geometry: region.geometry(),
+          maxPixels: 1e15,
+          //bestEffort: true,
+          scale: scale
+        });
+        var result=result.add(s);
+        index ++;
+      }
+//Export table from GEE
+      var Variable_10mband = ee.FeatureCollection(result.map(function(element){
+        element = ee.Dictionary(element); 
+        var list = ee.List(element.get('groups'));
+        var feats = ee.FeatureCollection(list.map(function(listEl){
+          var dict = ee.Dictionary(listEl);
+          return ee.Feature(null, dict);
+        }));
+        return feats;
+      })).flatten();
+      Export.table.toDrive({
+        collection: Variable_10mband,
+        description: file_name,
+        fileFormat: 'CSV'});    
+    
